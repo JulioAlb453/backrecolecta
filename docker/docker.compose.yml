@@ -1,3 +1,5 @@
+name: recolecta-stag-env
+
 services:
   database:
     image: postgres:16-alpine
@@ -5,8 +7,6 @@ services:
     restart: always
     env_file:
       - ../.env
-    ports:
-      - "${DB_PORT:-5432}:5432"
     environment:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
@@ -14,9 +14,14 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Evitamos que el entrypoint ejecute directamente el SQL (lo ejecuta el wrapper)
-      - ../gin-backend/db_script.sql:/docker-entrypoint-initdb.d/db_script.sql.skip:ro
+          # Schema Principal y tablas (sin constraints ni indexes)
+      - ../gin-backend/db_script.sql:/docker-entrypoint-initdb.d/01-db_script.sql.skip:ro
+          # Constraints y relaciones (separado para evitar bloqueos por dependencias)
+      - ../gin-backend/db_constraints.sql:/docker-entrypoint-initdb.d/02-db_constraints.sql.skip:ro
+          # Indexes (separado para evitar bloqueos por dependencias)
+      - ../gin-backend/db_indexes.sql:/docker-entrypoint-initdb.d/03-db_indexes.sql.skip:ro
       # Seed fuera del backend
-      - ./postgresql/seeds/seed.sql:/docker-entrypoint-initdb.d/seed.sql.skip:ro
+      - ./postgresql/seeds/seed.sql:/docker-entrypoint-initdb.d/04-seed.sql.skip:ro
       # Scripts utilitarios (no se autoejecutan, ubicados fuera del initdb)
       - ./postgresql/init-scripts/init_seeding.sh:/usr/local/bin/init_seeding.sh:ro
       - ./postgresql/init-scripts/init_dump.sh:/usr/local/bin/init_dump.sh:ro
@@ -41,8 +46,6 @@ services:
     restart: always
     env_file:
       - ../.env
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
@@ -57,6 +60,25 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      - app_internal_net
+
+  backend:
+    build:
+      context: ../gin-backend
+      dockerfile: Dockerfile
+    container_name: gin_backend
+    restart: always
+    env_file:
+      - ../.env
+    environment:
+      API_PORT: ${BACKEND_PORT:-8080}
+      DB_HOST: postgres_db
+    expose:
+      - "${BACKEND_PORT:-8080}"
+    depends_on:
+      database:
+        condition: service_healthy
     networks:
       - app_internal_net
 
