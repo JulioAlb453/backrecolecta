@@ -1,9 +1,19 @@
 #!/bin/sh
 # ============================================================================
 # verify-redis.sh - Validador de contrato Redis para seeds nivelados
+#
+# Uso:
+#   verify-redis.sh [--tls] [HOST] [PORT] [PASSWORD] [DB]
 # ============================================================================
 
 set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# shellcheck source=redis-cli-env.sh
+. "$SCRIPT_DIR/redis-cli-env.sh"
+redis_cli_bootstrap "$SCRIPT_DIR" "$0" "$@"
+redis_cli_parse_args "$@"
 
 EXPECTED_CONTRACT_VERSION="2.0"
 EXPECTED_USERS="200"
@@ -12,19 +22,6 @@ EXPECTED_ROUTES="5"
 EXPECTED_TRUCKS="6"
 EXPECTED_ASSIGNED_TRUCKS="5"
 REFERENCE_DATE="2026-01-30"
-
-REDIS_HOST="${1:-localhost}"
-REDIS_PORT="${2:-6379}"
-REDIS_PASSWORD="${3:-}"
-REDIS_DB="${4:-0}"
-
-if [ -n "$REDIS_PASSWORD" ]; then
-    export REDISCLI_AUTH="$REDIS_PASSWORD"
-fi
-
-redis_cmd() {
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" -n "$REDIS_DB" "$@"
-}
 
 ok() {
     echo "[OK] $1"
@@ -74,10 +71,17 @@ FAILED=0
 
 echo "[VALIDANDO] Contrato Redis Seed"
 
-if redis_cmd PING >/dev/null 2>&1; then
+ping_result=$(redis_cmd_ping || true)
+if [ "$ping_result" = "PONG" ]; then
     ok "Redis responde al PING"
 else
-    echo "[ERROR] Redis no responde al PING"
+    echo "[ERROR] Redis no responde al PING en $REDIS_HOST:$REDIS_PORT"
+    if [ -n "$ping_result" ]; then
+        echo "[DETALLE] redis-cli: $ping_result"
+    fi
+    if [ -z "$REDIS_TLS" ]; then
+        echo "[DETALLE] Upstash requiere TLS: agrega --tls como primer argumento"
+    fi
     exit 1
 fi
 

@@ -1,6 +1,13 @@
 #!/bin/sh
 # ============================================================================
 # load-redis.sh - Cargador seguro del seed Redis tab-delimitado
+#
+# Uso:
+#   load-redis.sh [--tls] [HOST] [PORT] [PASSWORD] [DB]
+#
+# Ejemplos:
+#   load-redis.sh redis 6379 redis_dev_pass_456
+#   load-redis.sh --tls popular-lamb-129664.upstash.io 6379 "$REDIS_PASSWORD"
 # ============================================================================
 
 set -eu
@@ -8,24 +15,16 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SEEDS_DIR="$SCRIPT_DIR/../seeds"
 
+# shellcheck source=redis-cli-env.sh
+. "$SCRIPT_DIR/redis-cli-env.sh"
+redis_cli_bootstrap "$SCRIPT_DIR" "$0" "$@"
+redis_cli_parse_args "$@"
+
 if [ -L "$SEEDS_DIR/redis-seed-latest.txt" ]; then
     SEED_FILE="$SEEDS_DIR/redis-seed-latest.txt"
 else
     SEED_FILE=$(ls -t "$SEEDS_DIR"/redis-seed_v*.txt 2>/dev/null | head -1 || true)
 fi
-
-REDIS_HOST="${1:-localhost}"
-REDIS_PORT="${2:-6379}"
-REDIS_PASSWORD="${3:-}"
-REDIS_DB="${4:-0}"
-
-if [ -n "$REDIS_PASSWORD" ]; then
-    export REDISCLI_AUTH="$REDIS_PASSWORD"
-fi
-
-redis_cmd() {
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" -n "$REDIS_DB" "$@"
-}
 
 log_info() {
     echo "[CARGANDO] $1"
@@ -45,13 +44,21 @@ if [ -z "${SEED_FILE:-}" ] || [ ! -f "$SEED_FILE" ]; then
     exit 1
 fi
 
-if ! redis_cmd PING >/dev/null 2>&1; then
+ping_result=$(redis_cmd_ping || true)
+if [ "$ping_result" != "PONG" ]; then
     log_error "No se puede conectar a Redis en $REDIS_HOST:$REDIS_PORT"
+    if [ -n "$ping_result" ]; then
+        log_detail "redis-cli: $ping_result"
+    fi
+    if [ -z "$REDIS_TLS" ]; then
+        log_detail "Upstash requiere TLS: agrega --tls como primer argumento"
+    fi
+    log_detail "En PowerShell usa una sola línea (sin \\ al final de cada línea)"
     exit 1
 fi
 
 log_info "Iniciando carga de datos en Redis"
-log_detail "Host: $REDIS_HOST:$REDIS_PORT | DB: $REDIS_DB"
+log_detail "Host: $REDIS_HOST:$REDIS_PORT | DB: $REDIS_DB | TLS: ${REDIS_TLS:-off}"
 log_detail "Seed: $SEED_FILE"
 
 payload_checksum=""
